@@ -1,5 +1,6 @@
 import type { Stage } from "~/modules/brackets-model";
 import type {
+  BracketFormat,
   TournamentFormat,
   TournamentMatch,
   TournamentStage,
@@ -17,6 +18,7 @@ import type {
 import type { Params } from "@remix-run/react";
 import invariant from "tiny-invariant";
 import type { DataTypes, ValueToArray } from "~/modules/brackets-manager/types";
+import { STAGE_SEARCH_PARAM } from "./tournament-bracket-constants";
 
 export function matchIdFromParams(params: Params<string>) {
   const result = Number(params["mid"]);
@@ -53,11 +55,13 @@ export function resolveHostingTeam(
   return teams[0];
 }
 
-export function resolveTournamentStageName(format: TournamentFormat) {
+export function resolveTournamentStageName(format: BracketFormat) {
   switch (format) {
     case "SE":
     case "DE":
       return "Elimination stage";
+    case "RR":
+      return "Groups stage";
     default: {
       assertUnreachable(format);
     }
@@ -65,13 +69,15 @@ export function resolveTournamentStageName(format: TournamentFormat) {
 }
 
 export function resolveTournamentStageType(
-  format: TournamentFormat
+  format: BracketFormat
 ): TournamentStage["type"] {
   switch (format) {
     case "SE":
       return "single_elimination";
     case "DE":
       return "double_elimination";
+    case "RR":
+      return "round_robin";
     default: {
       assertUnreachable(format);
     }
@@ -79,7 +85,7 @@ export function resolveTournamentStageType(
 }
 
 export function resolveTournamentStageSettings(
-  format: TournamentFormat
+  format: BracketFormat
 ): Stage["settings"] {
   switch (format) {
     case "SE":
@@ -87,6 +93,11 @@ export function resolveTournamentStageSettings(
     case "DE":
       return {
         grandFinal: "double",
+      };
+    // xxx: resolve from TO setting
+    case "RR":
+      return {
+        groupCount: 2,
       };
     default: {
       assertUnreachable(format);
@@ -171,4 +182,27 @@ export function everyMatchIsOver(bracket: ValueToArray<DataTypes>) {
   }
 
   return true;
+}
+
+export function resolveBracketFormatFromRequest({
+  request,
+  tournamentFormat,
+}: {
+  request: Request;
+  tournamentFormat: TournamentFormat;
+}): BracketFormat {
+  if (tournamentFormat === "SE" || tournamentFormat === "DE") {
+    return tournamentFormat;
+  }
+
+  const url = new URL(request.url);
+  const stage = url.searchParams.get(STAGE_SEARCH_PARAM.key);
+  if (tournamentFormat === "RR_TO_SE") {
+    if (stage === STAGE_SEARCH_PARAM.finals) return "SE";
+    if (stage === STAGE_SEARCH_PARAM.underground) return "SE";
+
+    return "RR";
+  }
+
+  assertUnreachable(tournamentFormat);
 }
