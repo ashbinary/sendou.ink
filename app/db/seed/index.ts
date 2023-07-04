@@ -45,9 +45,12 @@ import { TOURNAMENT } from "~/features/tournament/tournament-constants";
 import type { SeedVariation } from "~/routes/seed";
 import { nullFilledArray, pickRandomItem } from "~/utils/arrays";
 
-const calendarEventWithToToolsSz = () => calendarEventWithToTools(true);
+const calendarEventWithToToolsSz = () => calendarEventWithToTools("ITZ");
 const calendarEventWithToToolsTeamsSz = () =>
-  calendarEventWithToToolsTeams(true);
+  calendarEventWithToToolsTeams("ITZ");
+const calendarEventWithToToolsRR = () => calendarEventWithToTools("PP");
+const calendarEventWithToToolsTeamsRR = () =>
+  calendarEventWithToToolsTeams("PP");
 
 const basicSeeds = (variation?: SeedVariation | null) => [
   adminUser,
@@ -77,6 +80,10 @@ const basicSeeds = (variation?: SeedVariation | null) => [
   variation === "NO_TOURNAMENT_TEAMS"
     ? undefined
     : calendarEventWithToToolsTeamsSz,
+  variation === "NO_TOURNAMENT_TEAMS" ? undefined : calendarEventWithToToolsRR,
+  variation === "NO_TOURNAMENT_TEAMS"
+    ? undefined
+    : calendarEventWithToToolsTeamsRR,
   tournamentSubs,
   adminBuilds,
   manySplattershotBuilds,
@@ -640,9 +647,11 @@ function calendarEventResults() {
 }
 
 const TO_TOOLS_CALENDAR_EVENT_ID = 201;
-function calendarEventWithToTools(sz?: boolean) {
-  const tournamentId = sz ? 2 : 1;
-  const eventId = TO_TOOLS_CALENDAR_EVENT_ID + (sz ? 1 : 0);
+function calendarEventWithToTools(variation?: "ITZ" | "PP") {
+  const tournamentId = variation === "PP" ? 3 : variation === "ITZ" ? 2 : 1;
+  const eventId =
+    TO_TOOLS_CALENDAR_EVENT_ID +
+    (variation === "PP" ? 2 : variation === "ITZ" ? 1 : 0);
 
   sql
     .prepare(
@@ -660,8 +669,8 @@ function calendarEventWithToTools(sz?: boolean) {
     )
     .run({
       id: tournamentId,
-      format: "DE",
-      mapPickingStyle: sz ? "AUTO_SZ" : "AUTO_ALL",
+      format: variation === "PP" ? "RR_TO_SE" : "DE",
+      mapPickingStyle: variation === "ITZ" ? "AUTO_SZ" : "AUTO_ALL",
     });
 
   sql
@@ -688,7 +697,12 @@ function calendarEventWithToTools(sz?: boolean) {
     )
     .run({
       id: eventId,
-      name: sz ? "In The Zone 22" : "PICNIC #2",
+      name:
+        variation === "PP"
+          ? "Paddling Pool 222"
+          : variation === "ITZ"
+          ? "In The Zone 22"
+          : "PICNIC #2",
       description: faker.lorem.paragraph(),
       discordInviteCode: faker.lorem.word(),
       bracketUrl: faker.internet.url(),
@@ -757,14 +771,15 @@ const availablePairs = rankedModesShort
     availableStages.map((stageId) => ({ mode, stageId: stageId }))
   )
   .filter((pair) => !tiebreakerPicks.has(pair));
-function calendarEventWithToToolsTeams(sz?: boolean) {
+function calendarEventWithToToolsTeams(variation?: "ITZ" | "PP") {
   const userIds = userIdsInAscendingOrderById();
   const names = Array.from(
     new Set(new Array(100).fill(null).map(() => validTournamentTeamName()))
   ).concat("Chimera");
 
-  for (let id = 1; id <= 16; id++) {
-    const teamId = id + (sz ? 100 : 0);
+  for (let id = 1; id <= (variation === "PP" ? 7 : 16); id++) {
+    const teamId =
+      id + (variation === "PP" ? 200 : variation === "ITZ" ? 100 : 0);
 
     const name = names.pop();
     invariant(name, "tournament team name is falsy");
@@ -791,11 +806,11 @@ function calendarEventWithToToolsTeams(sz?: boolean) {
         id: teamId,
         name,
         createdAt: dateToDatabaseTimestamp(new Date()),
-        tournamentId: sz ? 2 : 1,
+        tournamentId: variation === "PP" ? 3 : variation === "ITZ" ? 2 : 1,
         inviteCode: nanoid(INVITE_CODE_LENGTH),
       });
 
-    if (sz || id !== 1) {
+    if (variation || id !== 1) {
       sql
         .prepare(
           `
@@ -809,7 +824,8 @@ function calendarEventWithToToolsTeams(sz?: boolean) {
       `
         )
         .run({
-          tournamentTeamId: id + (sz ? 100 : 0),
+          tournamentTeamId:
+            id + (variation === "PP" ? 200 : variation === "ITZ" ? 100 : 0),
           checkedInAt: dateToDatabaseTimestamp(new Date()),
         });
     }
@@ -839,7 +855,8 @@ function calendarEventWithToToolsTeams(sz?: boolean) {
       `
         )
         .run({
-          tournamentTeamId: id + (sz ? 100 : 0),
+          tournamentTeamId:
+            id + (variation === "PP" ? 200 : variation === "ITZ" ? 100 : 0),
           userId,
           isOwner: i === 0 ? 1 : 0,
           createdAt: dateToDatabaseTimestamp(new Date()),
@@ -856,14 +873,15 @@ function calendarEventWithToToolsTeams(sz?: boolean) {
       const stageUsedCounts: Partial<Record<StageId, number>> = {};
 
       for (const pair of shuffledPairs) {
-        if (sz && pair.mode !== "SZ") continue;
+        if (variation === "ITZ" && pair.mode !== "SZ") continue;
 
-        if (pair.mode === "SZ" && SZ >= (sz ? 6 : 2)) continue;
+        if (pair.mode === "SZ" && SZ >= (variation === "ITZ" ? 6 : 2)) continue;
         if (pair.mode === "TC" && TC >= 2) continue;
         if (pair.mode === "RM" && RM >= 2) continue;
         if (pair.mode === "CB" && CB >= 2) continue;
 
-        if (stageUsedCounts[pair.stageId] === (sz ? 1 : 2)) continue;
+        if (stageUsedCounts[pair.stageId] === (variation === "ITZ" ? 1 : 2))
+          continue;
 
         stageUsedCounts[pair.stageId] =
           (stageUsedCounts[pair.stageId] ?? 0) + 1;
@@ -883,7 +901,8 @@ function calendarEventWithToToolsTeams(sz?: boolean) {
         `
           )
           .run({
-            tournamentTeamId: id + (sz ? 100 : 0),
+            tournamentTeamId:
+              id + (variation === "PP" ? 200 : variation === "ITZ" ? 100 : 0),
             stageId: pair.stageId,
             mode: pair.mode,
           });
