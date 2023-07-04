@@ -19,7 +19,6 @@ import { findTeamsByTournamentId } from "../../tournament/queries/findTeamsByTou
 import { Alert } from "~/components/Alert";
 import { SubmitButton } from "~/components/SubmitButton";
 import { getTournamentManager } from "../core/brackets-manager";
-import hasTournamentStarted from "../../tournament/queries/hasTournamentStarted.server";
 import { findByIdentifier } from "../../tournament/queries/findByIdentifier.server";
 import { notFoundIfFalsy, parseRequestFormData, validate } from "~/utils/remix";
 import {
@@ -32,7 +31,7 @@ import {
 } from "~/utils/urls";
 import type { TournamentLoaderData } from "../../tournament/routes/to.$id";
 import { resolveBestOfs } from "../core/bestOf.server";
-import { findAllMatchesByTournamentId } from "../queries/findAllMatchesByTournamentId.server";
+import { findAllMatchesByStageId } from "../queries/findAllMatchesByStageId.server";
 import { setBestOf } from "../queries/setBestOf.server";
 import { canAdminTournament } from "~/permissions";
 import { requireUser, useUser } from "~/modules/auth";
@@ -45,6 +44,7 @@ import {
   resolveTournamentStageName,
   resolveTournamentStageSettings,
   resolveTournamentStageType,
+  searchParamStageValueToBracketFormat,
   teamsThatWillPlay,
 } from "../tournament-bracket-utils";
 import { sql } from "~/db/sql";
@@ -98,36 +98,44 @@ export const action: ActionFunction = async ({ params, request }) => {
   const tournament = notFoundIfFalsy(findByIdentifier(tournamentId));
   const data = await parseRequestFormData({ request, schema: bracketSchema });
   const manager = getTournamentManager("SQL");
-  // xxx: make something more robust
-  const bracketFormat =
-    tournament.format === "RR_TO_SE" ? "RR" : tournament.format;
 
   validate(canAdminTournament({ user, event: tournament }));
 
   switch (data._action) {
-    case "START_TOURNAMENT": {
-      const hasStarted = hasTournamentStarted(tournamentId);
+    case "START_BRACKET": {
+      const { bracketFormat, isUnderground } =
+        searchParamStageValueToBracketFormat({
+          stageParam: data.bracket,
+          tournamentFormat: tournament.format,
+        });
 
-      validate(!hasStarted);
+      validate(
+        !getTournamentManager("SQL")
+          .get.tournamentData(tournamentId)
+          .stage.some(
+            (s) =>
+              s.name ===
+              resolveTournamentStageName({ bracketFormat, isUnderground })
+          ),
+        "Bracket is already started"
+      );
 
       const teams = teamsThatWillPlay({
         teams: findTeamsByTournamentId(tournamentId),
         tournament,
         bracketFormat,
-        // xxx: TODO: underground
-        isUnderground: false,
+        isUnderground,
         results: allMatchResultsByTournamentId(tournamentId),
       });
 
       validate(teams.length >= 2, "Not enough teams registered");
 
       sql.transaction(() => {
-        manager.create({
+        const createdStage = manager.create({
           tournamentId,
-          // xxx: TODO: underground
           name: resolveTournamentStageName({
             bracketFormat,
-            isUnderground: false,
+            isUnderground,
           }),
           type: resolveTournamentStageType(bracketFormat),
           seeding: fillWithNullTillPowerOfTwo(teams.map((team) => team.name)),
@@ -135,7 +143,7 @@ export const action: ActionFunction = async ({ params, request }) => {
         });
 
         const bestOfs = resolveBestOfs(
-          findAllMatchesByTournamentId(tournamentId),
+          findAllMatchesByStageId(createdStage.id),
           bracketFormat
         );
         for (const [bestOf, id] of bestOfs) {
@@ -159,7 +167,8 @@ export const action: ActionFunction = async ({ params, request }) => {
       const teams = teamsThatWillPlay({
         teams: findTeamsByTournamentId(tournamentId),
         tournament,
-        bracketFormat,
+        // xxx:
+        bracketFormat: "DE",
         // xxx:
         isUnderground: false,
         results: allMatchResultsByTournamentId(tournamentId),
@@ -213,6 +222,7 @@ export const loader = ({ params, request }: LoaderArgs) => {
       s.name === resolveTournamentStageName({ bracketFormat, isUnderground })
   );
 
+  // stage already exists in the database
   if (stage) {
     const _everyMatchIsOver = everyMatchIsOver(bracket);
     // xxx: TODO - actually this should be "every match is over in the final stage", we can view final standings before underground bracket concludes
@@ -223,7 +233,14 @@ export const loader = ({ params, request }: LoaderArgs) => {
 
     return {
       enoughTeams: true,
-      bracket,
+      matches: bracket.match.filter((m) => m.stage_id === stage.id),
+      bracketFormat,
+      isUnderground,
+      bracket: {
+        participants: bracket.participant,
+        matches: bracket.match,
+        stages: [stage],
+      },
       roundBestOfs: bestOfsByTournamentId(tournamentId),
       everyMatchIsOver: _everyMatchIsOver,
       finalStandings: showFinalStandings
@@ -233,8 +250,11 @@ export const loader = ({ params, request }: LoaderArgs) => {
             stageId: stage.id,
           })
         : null,
+      isPreview: false,
     };
   }
+
+  // stage doesn't exist in the database yet
 
   const teams = teamsThatWillPlay({
     teams: findTeamsByTournamentId(tournamentId),
@@ -261,11 +281,18 @@ export const loader = ({ params, request }: LoaderArgs) => {
   const data = inMemoryTournamentManager.get.tournamentData(tournamentId);
 
   return {
-    bracket: data,
+    bracket: {
+      participants: data.participant,
+      matches: data.match,
+      stages: data.stage,
+    },
     enoughTeams,
     everyMatchIsOver: false,
+    bracketFormat,
+    isUnderground,
     roundBestOfs: null,
     finalStandings: null,
+    isPreview: true,
   };
 };
 
@@ -302,27 +329,19 @@ export default function TournamentBracketsPage() {
     }
 
     // @ts-expect-error - brackets-viewer is not typed
-    window.bracketsViewer.render(
-      {
-        stages: data.bracket.stage,
-        matches: data.bracket.match,
-        matchGames: data.bracket.match_game,
-        participants: data.bracket.participant,
-      },
-      {
-        customRoundName: (info: any) => {
-          if (info.groupType === "final-group" && info.roundNumber === 1) {
-            return "Grand Finals";
-          }
-          if (info.groupType === "final-group" && info.roundNumber === 2) {
-            return "Bracket Reset";
-          }
+    window.bracketsViewer.render(data.bracket, {
+      customRoundName: (info: any) => {
+        if (info.groupType === "final-group" && info.roundNumber === 1) {
+          return "Grand Finals";
+        }
+        if (info.groupType === "final-group" && info.roundNumber === 2) {
+          return "Bracket Reset";
+        }
 
-          return undefined;
-        },
-        separatedChildCountLabel: true,
-      }
-    );
+        return undefined;
+      },
+      separatedChildCountLabel: true,
+    });
 
     // my beautiful hack to show seeds
     // clean up probably not needed as it's not harmful to append more than one
@@ -371,6 +390,7 @@ export default function TournamentBracketsPage() {
     team.members.some((m) => m.userId === user?.id)
   );
 
+  // xxx: move to backend and handle logic when RR final bracket can be started
   const adminCanStart = () => {
     // for testing, is always possible to start in development
     if (process.env.NODE_ENV === "development") return true;
@@ -379,6 +399,18 @@ export default function TournamentBracketsPage() {
       databaseTimestampToDate(parentRouteData.event.startTime).getTime() <
       Date.now()
     );
+  };
+
+  const startBracketInputValue = () => {
+    if (data.isUnderground) return STAGE_SEARCH_PARAM.underground;
+    if (
+      parentRouteData.event.format === "RR_TO_SE" &&
+      data.bracketFormat !== "RR"
+    ) {
+      return STAGE_SEARCH_PARAM.finals;
+    }
+
+    return STAGE_SEARCH_PARAM.default;
   };
 
   return (
@@ -405,8 +437,13 @@ export default function TournamentBracketsPage() {
           </FormWithConfirm>
         </div>
       ) : null}
-      {!parentRouteData.hasStarted && data.enoughTeams ? (
+      {data.isPreview && data.enoughTeams ? (
         <Form method="post" className="stack items-center">
+          <input
+            type="hidden"
+            name="bracket"
+            value={startBracketInputValue()}
+          />
           {!canAdminTournament({ user, event: parentRouteData.event }) ? (
             <Alert
               variation="INFO"
@@ -427,7 +464,7 @@ export default function TournamentBracketsPage() {
                   variant="outlined"
                   size="tiny"
                   testId="finalize-bracket-button"
-                  _action="START_TOURNAMENT"
+                  _action="START_BRACKET"
                 >
                   {t("tournament:bracket.finalize.action")}
                 </SubmitButton>
@@ -555,7 +592,7 @@ function TournamentProgressPrompt({ ownedTeamId }: { ownedTeamId: number }) {
     let currentMatchId: number | undefined;
     let currentOpponent: string | undefined;
 
-    for (const match of data.bracket.match) {
+    for (const match of data.bracket.matches) {
       // BYE
       if (match.opponent1 === null || match.opponent2 === null) {
         continue;

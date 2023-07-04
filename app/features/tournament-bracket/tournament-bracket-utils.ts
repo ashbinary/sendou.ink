@@ -102,7 +102,9 @@ export function resolveTournamentStageSettings(
 ): Stage["settings"] {
   switch (format) {
     case "SE":
-      return {};
+      return {
+        consolationFinal: false,
+      };
     case "DE":
       return {
         grandFinal: "double",
@@ -198,24 +200,33 @@ export function everyMatchIsOver(bracket: ValueToArray<DataTypes>) {
   return true;
 }
 
-export function resolveBracketFormatFromRequest({
+export const resolveBracketFormatFromRequest = ({
   request,
   tournamentFormat,
 }: {
   request: Request;
+  tournamentFormat: TournamentFormat;
+}) =>
+  searchParamStageValueToBracketFormat({
+    stageParam: new URL(request.url).searchParams.get(STAGE_SEARCH_PARAM.key),
+    tournamentFormat,
+  });
+export function searchParamStageValueToBracketFormat({
+  stageParam,
+  tournamentFormat,
+}: {
+  stageParam: string | null;
   tournamentFormat: TournamentFormat;
 }): { bracketFormat: BracketFormat; isUnderground: boolean } {
   if (tournamentFormat === "SE" || tournamentFormat === "DE") {
     return { bracketFormat: tournamentFormat, isUnderground: false };
   }
 
-  const url = new URL(request.url);
-  const stage = url.searchParams.get(STAGE_SEARCH_PARAM.key);
   if (tournamentFormat === "RR_TO_SE") {
-    if (stage === STAGE_SEARCH_PARAM.finals) {
+    if (stageParam === STAGE_SEARCH_PARAM.finals) {
       return { bracketFormat: "SE", isUnderground: false };
     }
-    if (stage === STAGE_SEARCH_PARAM.underground) {
+    if (stageParam === STAGE_SEARCH_PARAM.underground) {
       return { bracketFormat: "SE", isUnderground: true };
     }
 

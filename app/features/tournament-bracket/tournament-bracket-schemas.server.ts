@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { id, safeJSONParse } from "~/utils/zod";
 import { TOURNAMENT } from "../tournament/tournament-constants";
+import { STAGE_SEARCH_PARAM } from "./tournament-bracket-constants";
 
 const reportedMatchPlayerIds = z.preprocess(
   safeJSONParse,
@@ -34,7 +35,12 @@ export const matchSchema = z.union([
 
 export const bracketSchema = z.union([
   z.object({
-    _action: z.literal("START_TOURNAMENT"),
+    _action: z.literal("START_BRACKET"),
+    bracket: z.enum([
+      STAGE_SEARCH_PARAM.default,
+      STAGE_SEARCH_PARAM.finals,
+      STAGE_SEARCH_PARAM.underground,
+    ]),
   }),
   z.object({
     _action: z.literal("FINALIZE_TOURNAMENT"),

@@ -1,17 +1,16 @@
 import invariant from "tiny-invariant";
-import type { FindAllMatchesByTournamentIdMatch } from "../queries/findAllMatchesByTournamentId.server";
+import type { FindAllMatchesByStageIdMatch } from "../queries/findAllMatchesByStageId.server";
 import type { BracketFormat } from "~/db/types";
 
 export function resolveBestOfs(
-  matches: Array<FindAllMatchesByTournamentIdMatch>,
+  matches: Array<FindAllMatchesByStageIdMatch>,
   format: BracketFormat
 ): [bestOf: 3 | 5 | 7, id: number][] {
   if (format === "RR") {
     return matches.map((match) => [3, match.matchId]);
   }
-  // xxx: implement SE bestOfs
   if (format === "SE") {
-    throw new Error("SE is not supported");
+    return matches.map((match) => [5, match.matchId]);
   }
 
   // 3 is default
