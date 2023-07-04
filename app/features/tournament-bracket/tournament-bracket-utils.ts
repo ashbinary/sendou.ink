@@ -1,4 +1,5 @@
-import type { Stage } from "~/modules/brackets-model";
+import type { Params } from "@remix-run/react";
+import invariant from "tiny-invariant";
 import type {
   BracketFormat,
   TournamentFormat,
@@ -6,18 +7,22 @@ import type {
   TournamentStage,
 } from "~/db/types";
 import {
-  sourceTypes,
+  checkInHasStarted,
+  teamHasCheckedIn,
+  type TournamentLoaderData,
+  type TournamentLoaderTeam,
+} from "~/features/tournament";
+import type { DataTypes, ValueToArray } from "~/modules/brackets-manager/types";
+import type { Stage } from "~/modules/brackets-model";
+import {
   seededRandom,
+  sourceTypes,
 } from "~/modules/tournament-map-list-generator";
 import { assertUnreachable } from "~/utils/types";
 import type { FindMatchById } from "../tournament-bracket/queries/findMatchById.server";
-import type {
-  TournamentLoaderData,
-  TournamentLoaderTeam,
-} from "~/features/tournament";
-import type { Params } from "@remix-run/react";
-import invariant from "tiny-invariant";
-import type { DataTypes, ValueToArray } from "~/modules/brackets-manager/types";
+import type { FindTeamsByTournamentId } from "../tournament/queries/findTeamsByTournamentId.server";
+import { teamsThatAdvanceFromGroups } from "./core/roundRobin.server";
+import type { AllMatchResult } from "./queries/allMatchResultsByTournamentId.server";
 import { STAGE_SEARCH_PARAM } from "./tournament-bracket-constants";
 
 export function matchIdFromParams(params: Params<string>) {
@@ -55,15 +60,23 @@ export function resolveHostingTeam(
   return teams[0];
 }
 
-export function resolveTournamentStageName(format: BracketFormat) {
-  switch (format) {
+export function resolveTournamentStageName({
+  bracketFormat,
+  isUnderground,
+}: {
+  bracketFormat: BracketFormat;
+  isUnderground: boolean;
+}) {
+  if (isUnderground) return "Underground stage";
+
+  switch (bracketFormat) {
     case "SE":
     case "DE":
       return "Elimination stage";
     case "RR":
       return "Groups stage";
     default: {
-      assertUnreachable(format);
+      assertUnreachable(bracketFormat);
     }
   }
 }
@@ -190,19 +203,56 @@ export function resolveBracketFormatFromRequest({
 }: {
   request: Request;
   tournamentFormat: TournamentFormat;
-}): BracketFormat {
+}): { bracketFormat: BracketFormat; isUnderground: boolean } {
   if (tournamentFormat === "SE" || tournamentFormat === "DE") {
-    return tournamentFormat;
+    return { bracketFormat: tournamentFormat, isUnderground: false };
   }
 
   const url = new URL(request.url);
   const stage = url.searchParams.get(STAGE_SEARCH_PARAM.key);
   if (tournamentFormat === "RR_TO_SE") {
-    if (stage === STAGE_SEARCH_PARAM.finals) return "SE";
-    if (stage === STAGE_SEARCH_PARAM.underground) return "SE";
+    if (stage === STAGE_SEARCH_PARAM.finals) {
+      return { bracketFormat: "SE", isUnderground: false };
+    }
+    if (stage === STAGE_SEARCH_PARAM.underground) {
+      return { bracketFormat: "SE", isUnderground: true };
+    }
 
-    return "RR";
+    return { bracketFormat: "RR", isUnderground: false };
   }
 
   assertUnreachable(tournamentFormat);
+}
+
+export function teamsThatWillPlay({
+  teams,
+  tournament,
+  bracketFormat,
+  isUnderground,
+  results,
+}: {
+  teams: FindTeamsByTournamentId;
+  tournament: Pick<TournamentLoaderData["event"], "startTime" | "format">;
+  bracketFormat: BracketFormat;
+  isUnderground: boolean;
+  results: AllMatchResult[];
+}) {
+  if (tournament.format === "RR_TO_SE" && bracketFormat === "SE") {
+    const teamsThatAdvance = teamsThatAdvanceFromGroups({
+      advancingPerGroupCount: 2,
+      results,
+    });
+
+    // xxx: TODO underground checkin
+    if (isUnderground) {
+      return teams.filter((t) => !teamsThatAdvance.includes(t.id));
+    }
+    return teams.filter((t) => teamsThatAdvance.includes(t.id));
+  }
+
+  if (checkInHasStarted(tournament)) {
+    return teams.filter(teamHasCheckedIn);
+  }
+
+  return teams;
 }

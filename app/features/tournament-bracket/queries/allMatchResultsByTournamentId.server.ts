@@ -1,4 +1,5 @@
 import { sql } from "~/db/sql";
+import type { TournamentStage } from "~/db/types";
 import type { ModeShort, StageId } from "~/modules/in-game-lists";
 import { parseDBArray, parseDBJsonArray } from "~/utils/sql";
 
@@ -18,6 +19,8 @@ const stm = sql.prepare(/* sql */ `
     "m"."opponentTwo" ->> '$.score' as "opponentTwoScore",
     "m"."opponentOne" ->> '$.result' as "opponentOneResult",
     "m"."opponentTwo" ->> '$.result' as "opponentTwoResult",
+    "m"."groupId",
+    "TournamentStage"."type" as "stageType",
     json_group_array(
       json_object(
         'stageId',
@@ -50,6 +53,8 @@ interface Opponent {
 export interface AllMatchResult {
   opponentOne: Opponent;
   opponentTwo: Opponent;
+  groupId: number;
+  stageType: TournamentStage["type"];
   maps: Array<{
     stageId: StageId;
     mode: ModeShort;
@@ -65,6 +70,8 @@ export function allMatchResultsByTournamentId(
 
   return rows.map((row) => {
     return {
+      groupId: row.groupId,
+      stageType: row.stageType,
       opponentOne: {
         id: row.opponentOneId,
         score: row.opponentOneScore,

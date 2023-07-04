@@ -94,3 +94,7 @@
   font-size: var(--fonts-xxxs);
   color: var(--theme);
 }
+
+.brackets-viewer .round-robin {
+  margin: 0 auto;
+}

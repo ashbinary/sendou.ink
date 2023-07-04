@@ -64,6 +64,8 @@ function summarize({ results }: { results?: AllMatchResult[] } = {}) {
           result: "loss",
           score: 0,
         },
+        groupId: 1,
+        stageType: "double_elimination",
       },
     ],
     teams: [
@@ -153,6 +155,8 @@ const resultsWith20: AllMatchResult[] = [
       result: "loss",
       score: 0,
     },
+    groupId: 1,
+    stageType: "double_elimination",
   },
   {
     maps: [
@@ -179,6 +183,8 @@ const resultsWith20: AllMatchResult[] = [
       result: "loss",
       score: 0,
     },
+    groupId: 1,
+    stageType: "double_elimination",
   },
 ];
 
@@ -244,6 +250,8 @@ const resultsWithSubbedRoster: AllMatchResult[] = [
       result: "loss",
       score: 1,
     },
+    groupId: 1,
+    stageType: "double_elimination",
   },
 ];
 

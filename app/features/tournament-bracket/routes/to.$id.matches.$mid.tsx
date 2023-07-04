@@ -60,6 +60,7 @@ export const links: LinksFunction = () => [
   },
 ];
 
+// xxx: first report not working?
 export const action: ActionFunction = async ({ params, request }) => {
   const user = await requireUser(request);
   const matchId = matchIdFromParams(params);

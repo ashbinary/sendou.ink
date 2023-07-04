@@ -36,19 +36,16 @@ import { findAllMatchesByTournamentId } from "../queries/findAllMatchesByTournam
 import { setBestOf } from "../queries/setBestOf.server";
 import { canAdminTournament } from "~/permissions";
 import { requireUser, useUser } from "~/modules/auth";
-import {
-  TOURNAMENT,
-  tournamentIdFromParams,
-  checkInHasStarted,
-  teamHasCheckedIn,
-} from "~/features/tournament";
+import { TOURNAMENT, tournamentIdFromParams } from "~/features/tournament";
 import {
   bracketSubscriptionKey,
   everyMatchIsOver,
   fillWithNullTillPowerOfTwo,
+  resolveBracketFormatFromRequest,
   resolveTournamentStageName,
   resolveTournamentStageSettings,
   resolveTournamentStageType,
+  teamsThatWillPlay,
 } from "../tournament-bracket-utils";
 import { sql } from "~/db/sql";
 import { useEventSource } from "remix-utils";
@@ -75,6 +72,7 @@ import invariant from "tiny-invariant";
 import { allMatchResultsByTournamentId } from "../queries/allMatchResultsByTournamentId.server";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
 import { queryCurrentTeamRating, queryCurrentUserRating } from "~/features/mmr";
+import { STAGE_SEARCH_PARAM } from "../tournament-bracket-constants";
 
 export const links: LinksFunction = () => {
   return [
@@ -93,12 +91,16 @@ export const links: LinksFunction = () => {
   ];
 };
 
+// xxx: check if allMatchResultsByTournamentId(tournamentId) needs to be called everytime
 export const action: ActionFunction = async ({ params, request }) => {
   const user = await requireUser(request);
   const tournamentId = tournamentIdFromParams(params);
   const tournament = notFoundIfFalsy(findByIdentifier(tournamentId));
   const data = await parseRequestFormData({ request, schema: bracketSchema });
   const manager = getTournamentManager("SQL");
+  // xxx: make something more robust
+  const bracketFormat =
+    tournament.format === "RR_TO_SE" ? "RR" : tournament.format;
 
   validate(canAdminTournament({ user, event: tournament }));
 
@@ -108,24 +110,33 @@ export const action: ActionFunction = async ({ params, request }) => {
 
       validate(!hasStarted);
 
-      let teams = findTeamsByTournamentId(tournamentId);
-      if (checkInHasStarted(tournament)) {
-        teams = teams.filter(teamHasCheckedIn);
-      }
+      const teams = teamsThatWillPlay({
+        teams: findTeamsByTournamentId(tournamentId),
+        tournament,
+        bracketFormat,
+        // xxx: TODO: underground
+        isUnderground: false,
+        results: allMatchResultsByTournamentId(tournamentId),
+      });
 
       validate(teams.length >= 2, "Not enough teams registered");
 
       sql.transaction(() => {
         manager.create({
           tournamentId,
-          name: resolveTournamentStageName(tournament.format),
-          type: resolveTournamentStageType(tournament.format),
+          // xxx: TODO: underground
+          name: resolveTournamentStageName({
+            bracketFormat,
+            isUnderground: false,
+          }),
+          type: resolveTournamentStageType(bracketFormat),
           seeding: fillWithNullTillPowerOfTwo(teams.map((team) => team.name)),
-          settings: resolveTournamentStageSettings(tournament.format),
+          settings: resolveTournamentStageSettings(bracketFormat),
         });
 
         const bestOfs = resolveBestOfs(
-          findAllMatchesByTournamentId(tournamentId)
+          findAllMatchesByTournamentId(tournamentId),
+          bracketFormat
         );
         for (const [bestOf, id] of bestOfs) {
           setBestOf({ bestOf, id });
@@ -145,10 +156,14 @@ export const action: ActionFunction = async ({ params, request }) => {
       const _everyMatchIsOver = everyMatchIsOver(bracket);
       validate(_everyMatchIsOver, "Not every match is over");
 
-      let teams = findTeamsByTournamentId(tournamentId);
-      if (checkInHasStarted(tournament)) {
-        teams = teams.filter(teamHasCheckedIn);
-      }
+      const teams = teamsThatWillPlay({
+        teams: findTeamsByTournamentId(tournamentId),
+        tournament,
+        bracketFormat,
+        // xxx:
+        isUnderground: false,
+        results: allMatchResultsByTournamentId(tournamentId),
+      });
 
       const _finalStandings =
         finalStandings({
@@ -183,52 +198,67 @@ export const action: ActionFunction = async ({ params, request }) => {
 
 export type TournamentBracketLoaderData = SerializeFrom<typeof loader>;
 
-export const loader = ({ params }: LoaderArgs) => {
+export const loader = ({ params, request }: LoaderArgs) => {
   const tournamentId = tournamentIdFromParams(params);
+  const tournament = notFoundIfFalsy(findByIdentifier(tournamentId));
+  const { bracketFormat, isUnderground } = resolveBracketFormatFromRequest({
+    request,
+    tournamentFormat: tournament.format,
+  });
 
-  const hasStarted = hasTournamentStarted(tournamentId);
-  const manager = getTournamentManager(hasStarted ? "SQL" : "IN_MEMORY");
+  const bracket = getTournamentManager("SQL").get.tournamentData(tournamentId);
 
-  if (hasStarted) {
-    const bracket = manager.get.tournamentData(tournamentId);
-    invariant(
-      bracket.stage.length === 1,
-      "Bracket doesn't have exactly one stage"
-    );
-    const stage = bracket.stage[0];
+  const stage = bracket.stage.find(
+    (s) =>
+      s.name === resolveTournamentStageName({ bracketFormat, isUnderground })
+  );
 
+  if (stage) {
     const _everyMatchIsOver = everyMatchIsOver(bracket);
+    // xxx: TODO - actually this should be "every match is over in the final stage", we can view final standings before underground bracket concludes
+    const showFinalStandings =
+      _everyMatchIsOver &&
+      !isUnderground &&
+      ["SE", "DE"].includes(bracketFormat);
+
     return {
       enoughTeams: true,
       bracket,
       roundBestOfs: bestOfsByTournamentId(tournamentId),
       everyMatchIsOver: _everyMatchIsOver,
-      finalStandings: _everyMatchIsOver
-        ? finalStandings({ manager, tournamentId, stageId: stage.id })
+      finalStandings: showFinalStandings
+        ? finalStandings({
+            manager: getTournamentManager("SQL"),
+            tournamentId,
+            stageId: stage.id,
+          })
         : null,
     };
   }
 
-  const tournament = notFoundIfFalsy(findByIdentifier(tournamentId));
-
-  let teams = findTeamsByTournamentId(tournamentId);
-  if (checkInHasStarted(tournament)) {
-    teams = teams.filter(teamHasCheckedIn);
-  }
+  const teams = teamsThatWillPlay({
+    teams: findTeamsByTournamentId(tournamentId),
+    tournament,
+    bracketFormat,
+    isUnderground,
+    results: allMatchResultsByTournamentId(tournamentId),
+  });
 
   const enoughTeams = teams.length >= TOURNAMENT.ENOUGH_TEAMS_TO_START;
+
+  const inMemoryTournamentManager = getTournamentManager("IN_MEMORY");
+
   if (enoughTeams) {
-    manager.create({
+    inMemoryTournamentManager.create({
       tournamentId,
-      name: resolveTournamentStageName(tournament.format),
-      type: resolveTournamentStageType(tournament.format),
+      name: resolveTournamentStageName({ bracketFormat, isUnderground }),
+      type: resolveTournamentStageType(bracketFormat),
       seeding: fillWithNullTillPowerOfTwo(teams.map((team) => team.name)),
-      settings: resolveTournamentStageSettings(tournament.format),
+      settings: resolveTournamentStageSettings(bracketFormat),
     });
   }
 
-  // TODO: use get.stageData
-  const data = manager.get.tournamentData(tournamentId);
+  const data = inMemoryTournamentManager.get.tournamentData(tournamentId);
 
   return {
     bracket: data,
@@ -239,6 +269,7 @@ export const loader = ({ params }: LoaderArgs) => {
   };
 };
 
+// xxx: round robin's elim stage lacks seeds
 export default function TournamentBracketsPage() {
   const { t } = useTranslation(["tournament"]);
   const visibility = useVisibilityChange();
@@ -354,6 +385,9 @@ export default function TournamentBracketsPage() {
     <div>
       {visibility !== "hidden" && !data.everyMatchIsOver ? (
         <AutoRefresher />
+      ) : null}
+      {parentRouteData.event.format === "RR_TO_SE" ? (
+        <BracketStageLinks />
       ) : null}
       {data.finalStandings &&
       !parentRouteData.hasFinalized &&
@@ -494,6 +528,18 @@ function useAutoRefresh() {
       });
     }
   }, [lastEvent, revalidate]);
+}
+
+// xxx: style these
+function BracketStageLinks() {
+  return (
+    <div className="stack horizontal md justify-center">
+      <Link to="">Group stage</Link>
+      <Link to={`?${STAGE_SEARCH_PARAM.key}=${STAGE_SEARCH_PARAM.finals}`}>
+        Final stage
+      </Link>
+    </div>
+  );
 }
 
 function TournamentProgressPrompt({ ownedTeamId }: { ownedTeamId: number }) {
