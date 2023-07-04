@@ -149,6 +149,7 @@ export function checkSourceIsValid({
 }
 
 export function HACKY_resolvePoolCode(event: TournamentLoaderData["event"]) {
+  if (event.name.includes("Paddling Pool")) return "PP";
   if (event.name.includes("In The Zone")) return "ITZ";
 
   return "PICNIC";
