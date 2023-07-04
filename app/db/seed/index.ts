@@ -51,6 +51,7 @@ const calendarEventWithToToolsTeamsSz = () =>
 const calendarEventWithToToolsRR = () => calendarEventWithToTools("PP");
 const calendarEventWithToToolsTeamsRR = () =>
   calendarEventWithToToolsTeams("PP");
+const tieBreakerMapsRR = () => calendarEventWithToToolsTieBreakerMapPool("PP");
 
 const basicSeeds = (variation?: SeedVariation | null) => [
   adminUser,
@@ -84,6 +85,7 @@ const basicSeeds = (variation?: SeedVariation | null) => [
   variation === "NO_TOURNAMENT_TEAMS"
     ? undefined
     : calendarEventWithToToolsTeamsRR,
+  tieBreakerMapsRR,
   tournamentSubs,
   adminBuilds,
   manySplattershotBuilds,
@@ -734,7 +736,7 @@ const tiebreakerPicks = new MapPool([
   { mode: "RM", stageId: 3 },
   { mode: "CB", stageId: 4 },
 ]);
-function calendarEventWithToToolsTieBreakerMapPool() {
+function calendarEventWithToToolsTieBreakerMapPool(variation?: "PP") {
   for (const { mode, stageId } of tiebreakerPicks.stageModePairs) {
     sql
       .prepare(
@@ -751,7 +753,10 @@ function calendarEventWithToToolsTieBreakerMapPool() {
       `
       )
       .run({
-        tieBreakerCalendarEventId: TO_TOOLS_CALENDAR_EVENT_ID,
+        tieBreakerCalendarEventId:
+          variation === "PP"
+            ? TO_TOOLS_CALENDAR_EVENT_ID + 2
+            : TO_TOOLS_CALENDAR_EVENT_ID,
         stageId,
         mode,
       });

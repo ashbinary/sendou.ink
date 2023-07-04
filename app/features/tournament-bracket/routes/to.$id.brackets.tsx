@@ -533,7 +533,7 @@ function useAutoRefresh() {
 // xxx: style these
 function BracketStageLinks() {
   return (
-    <div className="stack horizontal md justify-center">
+    <div className="stack horizontal md justify-center mb-4">
       <Link to="">Group stage</Link>
       <Link to={`?${STAGE_SEARCH_PARAM.key}=${STAGE_SEARCH_PARAM.finals}`}>
         Final stage
@@ -542,6 +542,7 @@ function BracketStageLinks() {
   );
 }
 
+// xxx: adjust to work with round robin and underground bracket
 function TournamentProgressPrompt({ ownedTeamId }: { ownedTeamId: number }) {
   const { t } = useTranslation(["tournament"]);
   const parentRouteData = useOutletContext<TournamentLoaderData>();
