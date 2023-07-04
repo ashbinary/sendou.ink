@@ -100,6 +100,7 @@ export function ScoreReporter({
 
   const matchIsLockedError = actionData?.error === "locked";
 
+  // xxx: undo last score not working in RR
   return (
     <div className="tournament-bracket__during-match-actions">
       <FancyStageBanner

@@ -222,8 +222,9 @@ export const loader = ({ params, request }: LoaderArgs) => {
       s.name === resolveTournamentStageName({ bracketFormat, isUnderground })
   );
 
-  // stage already exists in the database
   if (stage) {
+    // >>> stage already exists in the database
+
     const _everyMatchIsOver = everyMatchIsOver(bracket);
     // xxx: TODO - actually this should be "every match is over in the final stage", we can view final standings before underground bracket concludes
     const showFinalStandings =
@@ -254,7 +255,7 @@ export const loader = ({ params, request }: LoaderArgs) => {
     };
   }
 
-  // stage doesn't exist in the database yet
+  // >>> stage doesn't exist in the database yet
 
   const teams = teamsThatWillPlay({
     teams: findTeamsByTournamentId(tournamentId),
@@ -296,7 +297,6 @@ export const loader = ({ params, request }: LoaderArgs) => {
   };
 };
 
-// xxx: round robin's elim stage lacks seeds
 export default function TournamentBracketsPage() {
   const { t } = useTranslation(["tournament"]);
   const visibility = useVisibilityChange();
